@@ -26,17 +26,17 @@ defmodule CirroConnect.Mixfile do
   defp deps do
     [
       {:websockex, "~> 0.4.0"},
-      {:poison, ">= 1.5.0"}
+      {:poison, ">= 1.5.0"},
+      {:ex_doc, ">= 0.0.0", only: :dev}
     ]
   end
 
   defp description() do
-    "An Elixir websocket-based SQL connector for Cirro.\nCirroConnect allows Elixir programs to connect to Cirro (http://www.cirro.com) using its websocket API and issue federated queries."
+    "An Elixir websocket-based SQL connector for Cirro. CirroConnect allows Elixir programs to connect to Cirro (http://www.cirro.com) using its websocket API and issue federated queries."
   end
 
   defp package() do
     [
-      organization: "cirroinc",
       files: ["lib", "test", "mix.exs", "README*", "LICENSE*"],
       maintainers: ["Gerrard Hocks", "Daniel Parnell"],
       licenses: ["MIT"],

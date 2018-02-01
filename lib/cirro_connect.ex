@@ -5,19 +5,15 @@ defmodule CirroConnect do
   @moduledoc "Cirro WebSocket-based SQL connector - Copyright Cirro Inc, 2018"
 
   @timeout 60_000
-  @protocol_default "ws://" # TODO: get wss:// working with fresh cert
+  @protocol_default "wss://"
+  @query_path "/websockets/query"
 
   @doc "Connect to Cirro"
   def connect(url, user, password) do
     Register.start()
-    fullurl = if (url =~ "s://"), do: url, else: @protocol_default <> url <> "/websockets/query"
-    {:ok, wsconn} = WebSockex.start_link(fullurl, __MODULE__, :ok)
-    authenticate(wsconn, user, password)
-    receive do
-      {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
-      {:cirro_connect, %{"error" => false} = response} -> {:ok, {wsconn, response["task"]["authtoken"]}}
-    after
-      @timeout -> {:error, "Timed out waiting for authentication response"}
+    case WebSockex.start_link(finalize_url(url), __MODULE__, :ok) do
+      {:ok, wsconn} -> finalize_connection(wsconn, user, password)
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -162,6 +158,22 @@ defmodule CirroConnect do
   ## Inner workingnesses
   ##
 
+  defp finalize_url(url) do
+    prefix = if (url =~ "s://"), do: url, else: @protocol_default <> url
+    IO.inspect( prefix <> @query_path )
+    prefix <> @query_path
+  end
+
+  defp finalize_connection(wsconn, user, password) do
+    authenticate(wsconn, user, password)
+    receive do
+      {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
+      {:cirro_connect, %{"error" => false} = response} -> {:ok, {wsconn, response["task"]["authtoken"]}}
+    after
+      @timeout -> {:error, "Timed out waiting for authentication response"}
+    end
+  end
+
   defp dispatch(calltype, wsconn, authtoken, query, options) do
     wssend(
       wsconn,
@@ -175,6 +187,7 @@ defmodule CirroConnect do
       {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
       {:cirro_connect, %{"cancelled" => true, "message" => error_message}} -> {:error, error_message}
       {:cirro_connect, %{"error" => false} = response} -> {:ok, response}
+      {:error, error} -> {:error, error}
       {:error} -> {:error, "Unknown error"}
     after
       @timeout -> {:error, "Timed out waiting for response"}

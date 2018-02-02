@@ -20,16 +20,16 @@ end
 ## Usage
 
 ###Connecting to Cirro
-Here, and in all subsequent examples, `localhost:8464` refers to your Cirro installation's exposed websocket address.
+Here, and in all subsequent examples, `cirro.host.com` refers to your Cirro installation's exposed websocket address.
 The ws:// protocol is currently active as the default. wss:// support will become the default in an upcoming release. 
 
 To connect to Cirro, use `connect()` or `connect!()`
 ```elixir
 # return connection status
-CirroConnect.connect("localhost:8464","cirro_user","password")
+CirroConnect.connect("cirro.host.com","cirro_user","password")
 {:ok, {#PID<0.209.0>, "347456094e6885c5-6a83-48e0-a0d7-f08326c720af2141803887"}}
 # return connection for use in other CirroConnect calls
-CirroConnect.connect!("localhost:8464","cirro_user","password")
+CirroConnect.connect!("cirro.host.com","cirro_user","password")
 {#PID<0.218.0>, "1289850004088516e1-0f84-4e00-9988-691a4ffc22852010714971"}
     
 ```
@@ -38,7 +38,7 @@ CirroConnect.connect!("localhost:8464","cirro_user","password")
 You can determine if your connection is currently active using the `is_connected()` function.
 
 ```elixir
-c=CirroConnect.connect!("localhost:8464","cirro_user","password")
+c=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.is_connected(c)
 true
 CirroConnect.close(c)
@@ -50,7 +50,7 @@ false
 
 ####Basic selection
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password") 
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password") 
 "SELECT * from dbbox_postgres.oxon.public.person"
 |> CirroConnect.query(conn) 
 {:ok,
@@ -68,7 +68,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 
 ####Selection as a 'table' with a header row
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password") 
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password") 
 "SELECT * from dbbox_postgres.oxon.public.person"
 |> CirroConnect.query(conn) 
 |> CirroConnect.table()
@@ -78,7 +78,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 
 ####Selection returning a 'table' with just the rows
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "SELECT * from dbbox_postgres.oxon.public.person" 
 |> CirroConnect.query(conn) 
 |> CirroConnect.rows()
@@ -87,7 +87,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 
 ####Selection returning each row as a map of column name to value
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "SELECT * from dbbox_postgres.oxon.public.person" 
 |> CirroConnect.query(conn) 
 |> CirroConnect.map()
@@ -98,7 +98,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 
 ####Shortcut for returning each row as a map
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password") 
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password") 
 "SELECT * from dbbox_postgres.oxon.public.person"
 |> CirroConnect.query!(conn)
 [%{age: "23", id: "1", name: "Foople Smith"},
@@ -109,7 +109,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 ####Execute non-row-returning queries
 The results should contain the _count_ of the number of affected rows. 
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "DELETE from dbbox_postgres.oxon.public.personcopy" 
 |> CirroConnect.exec(conn)                                   
 {:ok,
@@ -125,7 +125,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 Queries are run on arbitrary connections maintained by a server-side connection pool. 
 To run several commands on a specific connection using multiple calls, you must give it a name
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 
 # execute a query on a named connection
 "SELECT * from dbbox_postgres.oxon.public.person"
@@ -139,7 +139,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 You should explicitly close a named connection. 
 However, it will be automatically cleaned up after 60 seconds of inactivity.
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.close(conn,%{name: "my_specific_connection"})
 ```
 
@@ -151,7 +151,7 @@ the _id_ from the original result's _task_.
 If you don't require further results, you can cancel the query with `CirroConnect.cancel(conn,id)` using the same id.
 This calling convention will hopefully be made easier to handle when wrapped in a stream (TODO). 
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "SELECT * FROM dbbox_postgres.oxon.public.person"                                 
 |> CirroConnect.query(conn,%{fetchsize: 2}) 
 {:ok,
@@ -186,7 +186,7 @@ You can run multiple statements in the one request.
 The results of SELECTS are concatenated. 
 The default delimiter is \; but can be overriden using the delimiter parameter
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "SELECT * from dbbox_postgres.oxon.public.person ; SELECT * from dbbox_oracle.dbo.public.person"
 |> CirroConnect.query(conn,%{delimiter: ";"})
 
@@ -199,7 +199,7 @@ conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
 #### Listing active connections
 It is possible to get list of the current Cirro connections your websocket connection is using
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.connections(conn)                                             
 [["*", "com.cirro.jdbc.client.net.security.NetConnection40@2cedebbd",
   "Tue Jan 02 16:06:42 UTC 2018", "2979", "Idle"]]
@@ -208,7 +208,7 @@ CirroConnect.connections(conn)
 #### Listing tasks
 You can get a list of the current tasks you have initiated that have not yet completed
 ```elixir
-conn=CirroConnect.connect!("localhost:8464","cirro_user","password")
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.tasks(conn)                                             
 []
 ```
@@ -216,6 +216,6 @@ CirroConnect.tasks(conn)
 #### Disconnecting
 To close all of your connections, and disconnect your connection to Cirro
 ```elixir
-connection=CirroConnect.connect!("localhost:8464","cirro_user","password")
+connection=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.close(connection)
 ```

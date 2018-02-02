@@ -160,7 +160,6 @@ defmodule CirroConnect do
 
   defp finalize_url(url) do
     prefix = if (url =~ "s://"), do: url, else: @protocol_default <> url
-    IO.inspect( prefix <> @query_path )
     prefix <> @query_path
   end
 

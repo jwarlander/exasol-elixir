@@ -48,7 +48,7 @@ false
 
 ### Queries
 
-####Basic selection
+#### Basic selection
 ```elixir
 conn=CirroConnect.connect!("cirro.host.com","cirro_user","password") 
 "SELECT * from dbbox_postgres.oxon.public.person"
@@ -66,7 +66,7 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
      "statement" => "SELECT * from dbbox_postgres.oxon.public.person"}}}
 ```
 
-####Selection as a 'table' with a header row
+#### Selection as a 'table' with a header row
 ```elixir
 conn=CirroConnect.connect!("cirro.host.com","cirro_user","password") 
 "SELECT * from dbbox_postgres.oxon.public.person"
@@ -76,7 +76,7 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 ["1", "Foople Smith", "23"],["3", "Procras Tinatus", "54"],["2", "オーマー・マズリ", "54"]]
 ```
 
-####Selection returning a 'table' with just the rows
+#### Selection returning a 'table' with just the rows
 ```elixir
 conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "SELECT * from dbbox_postgres.oxon.public.person" 
@@ -85,7 +85,7 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 [["1", "Foople Smith", "23"],["3", "Procras Tinatus", "54"],["2", "オーマー・マズリ", "54"]]
 ```
 
-####Selection returning each row as a map of column name to value
+#### Selection returning each row as a map of column name to value
 ```elixir
 conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "SELECT * from dbbox_postgres.oxon.public.person" 
@@ -96,7 +96,7 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
  %{age: "54", id: "2", name: "オーマー・マズリ"}]
 ```
 
-####Shortcut for returning each row as a map
+#### Shortcut for returning each row as a map
 ```elixir
 conn=CirroConnect.connect!("cirro.host.com","cirro_user","password") 
 "SELECT * from dbbox_postgres.oxon.public.person"
@@ -106,7 +106,7 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
  %{age: "54", id: "2", name: "オーマー・マズリ"}]
 ```
 
-####Execute non-row-returning queries
+#### Execute non-row-returning queries
 The results should contain the _count_ of the number of affected rows. 
 ```elixir
 conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
@@ -121,7 +121,7 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
      "statement" => "DELETE from dbbox_postgres.oxon.public.personcopy"}}}
 ```
 
-####Connection handling
+#### Connection handling
 Queries are run on arbitrary connections maintained by a server-side connection pool. 
 To run several commands on a specific connection using multiple calls, you must give it a name
 ```elixir
@@ -143,7 +143,7 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.close(conn,%{name: "my_specific_connection"})
 ```
 
-####Fetching batches of rows
+#### Fetching batches of rows
 It is possible to fetch a limited number of rows per call.
 This currently involves making an initial query with an optional _fetchsize_ value. This returns up to _fetchsize_ rows. 
 The value of _complete_ is false if there are more rows to retrieve. These can be fetched by calling _next()_ with 
@@ -181,7 +181,7 @@ CirroConnect.next(conn,"669")
 ```
 
 
-####Multiple statements
+#### Multiple statements
 You can run multiple statements in the one request. 
 The results of SELECTS are concatenated. 
 The default delimiter is \; but can be overriden using the delimiter parameter
@@ -210,6 +210,18 @@ You can get a list of the current tasks you have initiated that have not yet com
 ```elixir
 conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.tasks(conn)                                             
+[]
+```
+
+
+#### Monitoring Cirro
+To listen to Cirro monitoring events, bind a process via the `monitor` function.
+The process will then receive `{:cirro_monitor, event}` messages. 
+The event_type and session_id can be filtered using the optional options.
+CirroConnect.watch_events is provided as an example.
+```elixir
+conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
+spawn(CirroConnect,:watch_events,[]) |> CirroConnect.monitor(conn,%{event_type: "query"})                                             
 []
 ```
 

@@ -11,7 +11,7 @@ defmodule CirroConnect do
   @doc "Connect to Cirro"
   def connect(url, user, password) do
     Register.start()
-    case WebSockex.start_link(finalize_url(url), __MODULE__, :ok) do
+    case WebSockex.start_link(finalize_url(url), __MODULE__, :ok, [{:server_name_indication, :disable}]) do
       {:ok, wsconn} -> finalize_connection(wsconn, user, password)
       {:error, error} -> {:error, error}
     end
@@ -61,6 +61,15 @@ defmodule CirroConnect do
   def connections({wsconn, authtoken}) do
     dispatch(:connections, wsconn, authtoken, nil, %{})
     |> rows()
+  end
+
+  @doc "Forward monitoring events to the given process - options can contain restrictions for session_id and event_type"
+  def monitor(pid, {wsconn, authtoken}, options \\ %{}) do
+    wssend(
+      wsconn,
+      %{id: Register.next_id(), authtoken: authtoken, command: :monitor, options: options},
+      pid
+    )
   end
 
   @doc "Close a named connection"
@@ -154,6 +163,17 @@ defmodule CirroConnect do
     false
   end
 
+  @doc "Process all monitoring events (example)"
+  def watch_events do
+    receive do
+      {:cirro_monitor, event} ->
+        {:ok, event}
+        |> IO.inspect()
+    end
+    watch_events()
+  end
+
+
   ##
   ## Inner workingnesses
   ##
@@ -207,8 +227,8 @@ defmodule CirroConnect do
     )
   end
 
-  defp wssend(wsconn, message) do
-    Register.put(message.id, self())
+  defp wssend(wsconn, message, pid \\ self()) do
+    Register.put(message.id, pid)
     WebSockex.send_frame(wsconn, {:text, Poison.encode! message})
   end
 
@@ -216,8 +236,7 @@ defmodule CirroConnect do
     response = Poison.decode! text
     id = response["task"]["id"]
     case Register.get(id) do
-      {:ok, caller} -> Register.delete(id)
-                       send(caller, {:cirro_connect, response})
+      {:ok, caller} -> dispatch(id, caller, response)
                        {:ok, state}
       :error -> {:ok, state}
     end
@@ -231,4 +250,19 @@ defmodule CirroConnect do
     {:ok, state}
   end
 
+  defp dispatch(id, caller, response) do
+
+    case response["task"]["command"] do
+      "monitor" ->
+        #        IO.puts(
+        #          "MONITOR: " <> inspect(
+        #            {:ok, response}
+        #            |> rows
+        #          )
+        #        )
+        send(caller, {:cirro_monitor, response})
+      _ -> Register.delete(id)
+           send(caller, {:cirro_connect, response})
+    end
+  end
 end

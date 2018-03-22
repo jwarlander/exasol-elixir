@@ -65,11 +65,13 @@ defmodule CirroConnect do
 
   @doc "Forward monitoring events to the given process - options can contain restrictions for session_id and event_type"
   def monitor(pid, {wsconn, authtoken}, options \\ %{}) do
+    id = Register.next_id()
     wssend(
       wsconn,
-      %{id: Register.next_id(), authtoken: authtoken, command: :monitor, options: options},
+      %{id: id, authtoken: authtoken, command: :monitor, options: options},
       pid
     )
+    {:ok, id}
   end
 
   @doc "Close a named connection"

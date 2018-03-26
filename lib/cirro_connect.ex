@@ -24,52 +24,43 @@ defmodule CirroConnect do
   end
 
   @doc "Execute a rowless SQL statement"
-  def exec(query, {wsconn, authtoken}, options \\ %{}) do
-    dispatch(:execute, wsconn, authtoken, query, options)
+  def exec(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
+    dispatch(:execute, wsconn, authtoken, Register.next_id(), query, options, recipient)
   end
 
   @doc "Execute a query, returning status, rows and metadata"
-  def query(query, {wsconn, authtoken}, options \\ %{}) do
-    dispatch(:query, wsconn, authtoken, query, options)
-  end
-
-  @doc "Execute a query, returning rows and matadata without status"
-  def query!(query, {wsconn, authtoken}, options \\ %{}) do
-    dispatch(:query, wsconn, authtoken, query, options)
-    |> map()
+  def query(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
+    dispatch(:query, wsconn, authtoken, Register.next_id(), query, options, recipient)
   end
 
   @doc "Fetch the next fetchsize batch of results"
-  def next({wsconn, authtoken}, id) do
-    wssend(wsconn, %{id: id, authtoken: authtoken, command: :next})
-    await_results(wsconn)
+  def next({wsconn, authtoken}, id, recipient \\ nil) do
+    dispatch(:next, wsconn, authtoken, id, nil, {}, recipient)
   end
 
   @doc "Cancel a query"
   def cancel({wsconn, authtoken}, id) do
-    wssend(wsconn, %{id: id, authtoken: authtoken, command: :cancel})
+    wssend(wsconn, %{id: id, authtoken: authtoken, command: :cancel}, nil)
     {:ok, {wsconn, authtoken}}
   end
 
   @doc "Fetch the task table"
-  def tasks({wsconn, authtoken}) do
-    dispatch(:tasks, wsconn, authtoken, nil, %{})
-    |> rows()
+  def tasks({wsconn, authtoken}, recipient \\ nil) do
+    dispatch(:tasks, wsconn, authtoken, Register.next_id(), nil, %{}, recipient)
   end
 
   @doc "Fetch the connections table"
-  def connections({wsconn, authtoken}) do
-    dispatch(:connections, wsconn, authtoken, nil, %{})
-    |> rows()
+  def connections({wsconn, authtoken}, recipient \\ nil) do
+    dispatch(:connections, wsconn, authtoken, Register.next_id(), nil, %{}, recipient)
   end
 
   @doc "Forward monitoring events to the given process - options can contain restrictions for session_id and event_type"
-  def monitor(pid, {wsconn, authtoken}, options \\ %{}) do
+  def monitor({wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
     id = Register.next_id()
     wssend(
       wsconn,
       %{id: id, authtoken: authtoken, command: :monitor, options: options},
-      pid
+      recipient
     )
     {:ok, id}
   end
@@ -85,7 +76,8 @@ defmodule CirroConnect do
         options: %{
           name: name
         }
-      }
+      },
+      nil
     )
     {:ok, {wsconn, authtoken}}
   end
@@ -165,14 +157,21 @@ defmodule CirroConnect do
     false
   end
 
-  @doc "Process all monitoring events (example)"
-  def watch_events do
+  @doc "Wait for results (default)"
+  def await_results() do
     receive do
-      {:cirro_monitor, event} ->
-        {:ok, event}
-        |> IO.inspect()
+      {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
+      {:cirro_connect, %{"cancelled" => true, "message" => error_message}} -> {:error, error_message}
+      {:cirro_connect, %{"error" => false} = response} -> {:ok, response}
+      {:cirro_monitor, event} -> {:ok, event}
+      {:error, error} -> {:error, error}
+      {:error} -> {:error, "Unknown error"}
     end
-    watch_events()
+  end
+
+  @doc "Dump a message (example)"
+  def dump_message(message) do
+    IO.puts("EVENT: " <> inspect(message))
   end
 
 
@@ -195,24 +194,21 @@ defmodule CirroConnect do
     end
   end
 
-  defp dispatch(calltype, wsconn, authtoken, query, options) do
+  defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) when is_nil(recipient) do
     wssend(
       wsconn,
-      %{id: Register.next_id(), authtoken: authtoken, command: calltype, statement: to_string(query), options: options}
+      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options},
+      self()
     )
-    await_results(wsconn)
+    await_results()
   end
 
-  defp await_results(_wsconn) do
-    receive do
-      {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
-      {:cirro_connect, %{"cancelled" => true, "message" => error_message}} -> {:error, error_message}
-      {:cirro_connect, %{"error" => false} = response} -> {:ok, response}
-      {:error, error} -> {:error, error}
-      {:error} -> {:error, "Unknown error"}
-    after
-      @timeout -> {:error, "Timed out waiting for response"}
-    end
+  defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) do
+    wssend(
+      wsconn,
+      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options},
+      recipient
+    )
   end
 
   defp authenticate(wsconn, user, password) do
@@ -224,13 +220,18 @@ defmodule CirroConnect do
         options: %{
           user: user,
           password_encrypted: :base64.encode(password)
-        }
-      }
+        },
+      },
+      self()
     )
   end
 
-  defp wssend(wsconn, message, pid \\ self()) do
-    Register.put(message.id, pid)
+  defp wssend(wsconn, message, recipient) when is_nil(recipient) do
+    wssend(wsconn, message, self())
+  end
+
+  defp wssend(wsconn, message, recipient) do
+    Register.put(message.id, recipient)
     WebSockex.send_frame(wsconn, {:text, Poison.encode! message})
   end
 
@@ -238,7 +239,7 @@ defmodule CirroConnect do
     response = Poison.decode! text
     id = response["task"]["id"]
     case Register.get(id) do
-      {:ok, caller} -> dispatch(id, caller, response)
+      {:ok, caller} -> respond(id, caller, response)
                        {:ok, state}
       :error -> {:ok, state}
     end
@@ -252,19 +253,23 @@ defmodule CirroConnect do
     {:ok, state}
   end
 
-  defp dispatch(id, caller, response) do
-
+  defp respond(id, recipient, response) do
     case response["task"]["command"] do
-      "monitor" ->
-        #        IO.puts(
-        #          "MONITOR: " <> inspect(
-        #            {:ok, response}
-        #            |> rows
-        #          )
-        #        )
-        send(caller, {:cirro_monitor, response})
+      "monitor" -> respond(recipient, {:cirro_monitor, response})
       _ -> Register.delete(id)
-           send(caller, {:cirro_connect, response})
+           respond(recipient, {:cirro_connect, response})
     end
+  end
+
+  defp respond(recipient, response) when is_nil(recipient) do
+    {:ok, response}
+  end
+
+  defp respond(recipient, response) when is_pid(recipient) do
+    send(recipient, response)
+  end
+
+  defp respond(recipient, response) when is_function(recipient) do
+    recipient.(response)
   end
 end

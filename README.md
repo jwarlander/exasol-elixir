@@ -11,7 +11,7 @@ Add the following to `mix.exs` to include it in your project:
 ```elixir
 def deps do
   [
-    {:cirro_connect, ">= 0.1.0"},
+    {:cirro_connect, ">= 0.1.4"},
   ]
 end
 ```
@@ -91,16 +91,6 @@ conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 "SELECT * from dbbox_postgres.oxon.public.person" 
 |> CirroConnect.query(conn) 
 |> CirroConnect.map()
-[%{age: "23", id: "1", name: "Foople Smith"},
- %{age: "54", id: "3", name: "Procras Tinatus"},
- %{age: "54", id: "2", name: "オーマー・マズリ"}]
-```
-
-#### Shortcut for returning each row as a map
-```elixir
-conn=CirroConnect.connect!("cirro.host.com","cirro_user","password") 
-"SELECT * from dbbox_postgres.oxon.public.person"
-|> CirroConnect.query!(conn)
 [%{age: "23", id: "1", name: "Foople Smith"},
  %{age: "54", id: "3", name: "Procras Tinatus"},
  %{age: "54", id: "2", name: "オーマー・マズリ"}]
@@ -213,16 +203,14 @@ CirroConnect.tasks(conn)
 []
 ```
 
-
 #### Monitoring Cirro
-To listen to Cirro monitoring events, bind a process via the `monitor` function.
-The process will then receive `{:cirro_monitor, event}` messages. 
+To listen to Cirro monitoring events, bind a process or function via the `monitor` function.
+A process will then receive `{:cirro_monitor, event}` messages, whereas a function will just be called with these messages.
 The event_type and session_id can be filtered using the optional options.
 CirroConnect.watch_events is provided as an example.
 ```elixir
-conn=CirroConnect.connect!("cirro.host.com","cirro_user","password")
-spawn(CirroConnect,:watch_events,[]) |> CirroConnect.monitor(conn,%{event_type: "query"})                                             
-[]
+CirroConnect.connect!("cirro.host.com","cirro_user","password") |>
+CirroConnect.monitor(%{event_type: "query"}, &CirroConnect.dump_message/1)                                             
 ```
 
 #### Disconnecting
@@ -230,4 +218,34 @@ To close all of your connections, and disconnect your connection to Cirro
 ```elixir
 connection=CirroConnect.connect!("cirro.host.com","cirro_user","password")
 CirroConnect.close(connection)
+```
+
+#### Custom message handling
+By default, responses from Cirro are received by the current process. 
+Therefore each call will usually block until the results are returned.
+You can provide custom recipient function or process to handle incoming messages. 
+Processes will receive messages, whereas functions will be supplied the message as an argument.
+The process or function argument is an optional parameter after the options parameter.
+
+Some examples
+```elixir
+# Function example
+CirroConnect.query("SELECT * FROM SYS.SYSROLES",conn,%{delimiter: ";"},&MyThing.handle_results/1)
+# Process example
+pid=spawn(MyThing,:wait_for_cirro_messages,[])
+CirroConnect.query("SELECT * FROM SYS.SYSROLES",conn,%{delimiter: ";"},pid)
+```
+
+The default process message handler looks like this:
+```elixir
+ def await_results() do
+    receive do
+      {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
+      {:cirro_connect, %{"cancelled" => true, "message" => error_message}} -> {:error, error_message}
+      {:cirro_connect, %{"error" => false} = response} -> {:ok, response}
+      {:cirro_monitor, event} -> {:ok, event}
+      {:error, error} -> {:error, error}
+      {:error} -> {:error, "Unknown error"}
+    end
+  end
 ```

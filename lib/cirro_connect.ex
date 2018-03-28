@@ -1,3 +1,5 @@
+require Logger
+
 defmodule CirroConnect do
   use WebSockex
   alias CirroConnect.MessageRegister, as: Register
@@ -7,6 +9,7 @@ defmodule CirroConnect do
   @timeout 60_000
   @protocol_default "wss://"
   @query_path "/websockets/query"
+  @valid_options [:name, :fetchsize, :delimiter, :multi, :user, :password, :password_encrypted, :event_type, :session_id, :systems, :period]
 
   @doc "Connect to Cirro"
   def connect(url, user, password) do
@@ -25,22 +28,28 @@ defmodule CirroConnect do
 
   @doc "Execute a rowless SQL statement"
   def exec(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
-    dispatch(:execute, wsconn, authtoken, Register.next_id(), query, options, recipient)
+    dispatch(:execute, wsconn, authtoken, options[:id] || Register.next_id(), query, options, recipient)
   end
 
   @doc "Execute a query, returning status, rows and metadata"
   def query(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
-    dispatch(:query, wsconn, authtoken, Register.next_id(), query, options, recipient)
+    dispatch(:query, wsconn, authtoken, options[:id] || Register.next_id(), query, options, recipient)
   end
 
   @doc "Fetch the next fetchsize batch of results"
   def next({wsconn, authtoken}, id, recipient \\ nil) do
-    dispatch(:next, wsconn, authtoken, id, nil, {}, recipient)
+    dispatch(:next, wsconn, authtoken, id, nil, %{}, recipient)
   end
 
   @doc "Cancel a query"
   def cancel({wsconn, authtoken}, id) do
     wssend(wsconn, %{id: id, authtoken: authtoken, command: :cancel}, nil)
+    {:ok, {wsconn, authtoken}}
+  end
+
+  @doc "Skip any remaining rows of a query"
+  def skip({wsconn, authtoken}, id) do
+    wssend(wsconn, %{id: id, authtoken: authtoken, command: :skip}, nil)
     {:ok, {wsconn, authtoken}}
   end
 
@@ -97,7 +106,8 @@ defmodule CirroConnect do
 
   @doc "Handle abrupt termination of web socket"
   def terminate(reason, state) do
-    IO.puts("\nCirroConnect WebSocket Terminating:\n#{inspect reason}\n\n#{inspect state}\n")
+    Logger.error("CirroConnect WebSocket Terminating:\n#{inspect reason}\n\n#{inspect state}\n")
+
     exit(:normal)
   end
 
@@ -158,7 +168,7 @@ defmodule CirroConnect do
   end
 
   @doc "Wait for results (default)"
-  def await_results() do
+  def await_results(timeout \\ @timeout) do
     receive do
       {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
       {:cirro_connect, %{"cancelled" => true, "message" => error_message}} -> {:error, error_message}
@@ -166,6 +176,8 @@ defmodule CirroConnect do
       {:cirro_monitor, event} -> {:ok, event}
       {:error, error} -> {:error, error}
       {:error} -> {:error, "Unknown error"}
+    after
+      timeout -> {:error, "Timed out waiting for results"}
     end
   end
 
@@ -173,7 +185,6 @@ defmodule CirroConnect do
   def dump_message(message) do
     IO.puts("EVENT: " <> inspect(message))
   end
-
 
   ##
   ## Inner workingnesses
@@ -197,16 +208,16 @@ defmodule CirroConnect do
   defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) when is_nil(recipient) do
     wssend(
       wsconn,
-      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options},
+      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options |> Map.take(@valid_options)},
       self()
     )
-    await_results()
+    await_results(options[:timeout] || @timeout)
   end
 
   defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) do
     wssend(
       wsconn,
-      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options},
+      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options |> Map.take(@valid_options)},
       recipient
     )
   end
@@ -270,6 +281,6 @@ defmodule CirroConnect do
   end
 
   defp respond(recipient, response) when is_function(recipient) do
-    recipient.(response)
+    spawn fn -> recipient.(response) end
   end
 end

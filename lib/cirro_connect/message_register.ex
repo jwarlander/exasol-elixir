@@ -23,18 +23,11 @@ defmodule CirroConnect.MessageRegister do
   end
 
   def next_id() do
-    {:ok, id} = GenServer.call(:cirro_message_register, {:get, :next_id})
-    id
+    System.unique_integer |> to_string
   end
 
   def init(:ok) do
-    {:ok, %{next_id: 666}}
-  end
-
-  def handle_call({:get, :next_id}, _from, map) do
-    {:ok, id} = Map.fetch(map, :next_id)
-    map = Map.put(map, :next_id, id + 1)
-    {:reply, {:ok, to_string(id)}, map}
+    {:ok, %{}}
   end
 
   def handle_call({:get, name}, _from, map) do

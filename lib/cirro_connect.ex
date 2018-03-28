@@ -41,15 +41,14 @@ defmodule CirroConnect do
     dispatch(:next, wsconn, authtoken, id, nil, %{}, recipient)
   end
 
+  @doc "Skip any remaining rows of a query"
+  def skip({wsconn, authtoken}, id, recipient \\ nil) do
+    dispatch(:skip, wsconn, authtoken, id, nil, %{}, recipient)
+  end
+
   @doc "Cancel a query"
   def cancel({wsconn, authtoken}, id) do
     wssend(wsconn, %{id: id, authtoken: authtoken, command: :cancel}, nil)
-    {:ok, {wsconn, authtoken}}
-  end
-
-  @doc "Skip any remaining rows of a query"
-  def skip({wsconn, authtoken}, id) do
-    wssend(wsconn, %{id: id, authtoken: authtoken, command: :skip}, nil)
     {:ok, {wsconn, authtoken}}
   end
 

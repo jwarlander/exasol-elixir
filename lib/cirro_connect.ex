@@ -28,12 +28,12 @@ defmodule CirroConnect do
 
   @doc "Execute a rowless SQL statement"
   def exec(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
-    dispatch(:execute, wsconn, authtoken, options[:id] || Register.next_id(), query, options, recipient)
+    dispatch(:execute, wsconn, authtoken, Register.next_id(), query, options, recipient)
   end
 
   @doc "Execute a query, returning status, rows and metadata"
   def query(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
-    dispatch(:query, wsconn, authtoken, options[:id] || Register.next_id(), query, options, recipient)
+    dispatch(:query, wsconn, authtoken, Register.next_id(), query, options, recipient)
   end
 
   @doc "Fetch the next fetchsize batch of results"
@@ -214,11 +214,10 @@ defmodule CirroConnect do
   end
 
   defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) do
-    wssend(
-      wsconn,
-      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options |> Map.take(@valid_options)},
-      recipient
-    )
+    case wssend(wsconn, %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options |> Map.take(@valid_options)}, recipient) do
+      :ok -> {:ok, id}
+      error -> error
+    end
   end
 
   defp authenticate(wsconn, user, password) do

@@ -23,7 +23,8 @@ defmodule CirroConnect.MessageRegister do
   end
 
   def next_id() do
-    System.unique_integer |> to_string
+    System.unique_integer
+    |> to_string
   end
 
   def init(:ok) do

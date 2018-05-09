@@ -100,13 +100,15 @@ defmodule CirroConnect do
 
   @doc "Handle incorrect close gracefully"
   def close(nil) do
-    {:error, "invalid connection"}
+    {:error, "Invalid connection"}
   end
 
-  @doc "Handle abrupt termination of web socket"
+  @doc "Handletermination of web socket"
   def terminate(reason, state) do
-    Logger.error("CirroConnect WebSocket Terminating:\n#{inspect reason}\n\n#{inspect state}\n")
-
+    case state do
+      :ok -> :ok
+      _ -> Logger.error("CirroConnect WebSocket Terminating:\n#{inspect reason}\n\n#{inspect state}\n")
+    end
     exit(:normal)
   end
 
@@ -195,26 +197,49 @@ defmodule CirroConnect do
   end
 
   defp finalize_connection(wsconn, user, password) do
-    authenticate(wsconn, user, password)
-    receive do
-      {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
-      {:cirro_connect, %{"error" => false} = response} -> {:ok, {wsconn, response["task"]["authtoken"]}}
-    after
-      @timeout -> {:error, "Timed out waiting for authentication response"}
+    case authenticate(wsconn, user, password) do
+      :ok ->
+        receive do
+          {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
+          {:cirro_connect, %{"error" => false} = response} -> {:ok, {wsconn, response["task"]["authtoken"]}}
+        after
+          @timeout -> {:error, "Timed out waiting for authentication response"}
+        end
+      error -> error
     end
   end
 
   defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) when is_nil(recipient) do
-    wssend(
-      wsconn,
-      %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options |> Map.take(@valid_options)},
-      self()
-    )
-    await_results(options[:timeout] || @timeout)
+    case wssend(
+           wsconn,
+           %{
+             id: id,
+             authtoken: authtoken,
+             command: calltype,
+             statement: to_string(query),
+             options: options
+                      |> Map.take(@valid_options)
+           },
+           self()
+         ) do
+      :ok -> await_results(options[:timeout] || @timeout)
+      error -> error
+    end
   end
 
   defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) do
-    case wssend(wsconn, %{id: id, authtoken: authtoken, command: calltype, statement: to_string(query), options: options |> Map.take(@valid_options)}, recipient) do
+    case wssend(
+           wsconn,
+           %{
+             id: id,
+             authtoken: authtoken,
+             command: calltype,
+             statement: to_string(query),
+             options: options
+                      |> Map.take(@valid_options)
+           },
+           recipient
+         ) do
       :ok -> {:ok, id}
       error -> error
     end
@@ -240,8 +265,12 @@ defmodule CirroConnect do
   end
 
   defp wssend(wsconn, message, recipient) do
-    Register.put(message.id, recipient)
-    WebSockex.send_frame(wsconn, {:text, Poison.encode! message})
+    case Process.alive?(wsconn) do
+      true -> Register.put(message.id, recipient)
+              WebSockex.send_frame(wsconn, {:text, Poison.encode! message})
+              :ok
+      false -> {:error, "Invalid Cirro connection"}
+    end
   end
 
   def handle_frame({:text, text}, state) do
@@ -275,7 +304,10 @@ defmodule CirroConnect do
   end
 
   defp respond(recipient, response) when is_pid(recipient) do
-    send(recipient, response)
+    case Process.alive?(recipient) do
+      true -> send(recipient, response)
+      false -> {:error, "Process that initiated the Cirro connection (#{inspect(recipient)}) is no longer running"}
+    end
   end
 
   defp respond(recipient, response) when is_function(recipient) do

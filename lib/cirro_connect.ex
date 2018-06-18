@@ -12,9 +12,11 @@ defmodule CirroConnect do
   @valid_options [:name, :fetchsize, :delimiter, :multi, :user, :password, :password_encrypted, :event_type, :session_id, :systems, :period]
 
   @doc "Connect to Cirro"
-  def connect(url, user, password) do
+  def connect(url, user, password, options \\ []) do
     Register.start()
-    case WebSockex.start_link(finalize_url(url), __MODULE__, :ok, [{:server_name_indication, :disable}]) do
+    opts = Keyword.merge(options, [{:server_name_indication, :disable}])
+
+    case WebSockex.start_link(finalize_url(url), __MODULE__, :ok, opts) do
       {:ok, wsconn} -> finalize_connection(wsconn, user, password)
       {:error, error} -> {:error, error}
     end
@@ -251,10 +253,7 @@ defmodule CirroConnect do
       %{
         id: Register.next_id(),
         command: "authenticate",
-        options: %{
-          user: user,
-          password_encrypted: :base64.encode(password)
-        },
+        options: %{ user: user, password_encrypted: :base64.encode(password) },
       },
       self()
     )

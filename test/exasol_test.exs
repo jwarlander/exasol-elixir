@@ -3,6 +3,6 @@ defmodule ExasolTest do
   doctest Exasol
 
   test "Try to connect" do
-    assert Exasol.connect("localhost:8464", "root", "test") == {:ok, _}
+    assert {:ok, _} = Exasol.connect("ws://localhost:8563", "sys", "exasol", debug: [:trace])
   end
 end

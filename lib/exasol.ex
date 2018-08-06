@@ -1,34 +1,18 @@
-require Logger
-
 defmodule Exasol do
+  @moduledoc """
+  Exasol WebSocket-based SQL connector
+  """
   use WebSockex
-  alias Exasol.MessageRegister, as: Register
+  require Logger
 
-  @moduledoc "Exasol WebSocket-based SQL connector"
-
-  @timeout 60_000
-  @protocol_default "wss://"
-  @query_path "/websockets/query"
-  @valid_options [
-    :name,
-    :fetchsize,
-    :delimiter,
-    :multi,
-    :user,
-    :password,
-    :password_encrypted,
-    :event_type,
-    :session_id,
-    :systems,
-    :period
-  ]
+  @timeout 5_000
+  @protocol_default "ws://"
 
   @doc "Connect to Exasol"
   def connect(url, user, password, options \\ []) do
-    Register.start()
     opts = Keyword.merge(options, [{:server_name_indication, :disable}])
 
-    case WebSockex.start_link(finalize_url(url), __MODULE__, :ok, opts) do
+    case WebSockex.start_link(url, __MODULE__, %{caller: self()}, opts) do
       {:ok, wsconn} -> finalize_connection(wsconn, user, password)
       {:error, error} -> {:error, error}
     end
@@ -223,20 +207,30 @@ defmodule Exasol do
   ## Inner workingnesses
   ##
 
-  defp finalize_url(url) do
-    prefix = if url =~ "s://", do: url, else: @protocol_default <> url
-    prefix <> @query_path
+  defp finalize_connection(wsconn, user, password) do
+    with {:ok, key} <- start_login(wsconn),
+         :ok = authenticate(wsconn, user, password, key),
+         do: {:ok, wsconn}
   end
 
-  defp finalize_connection(wsconn, user, password) do
-    case authenticate(wsconn, user, password) do
+  defp start_login(wsconn) do
+    result =
+      wssend(wsconn, %{
+        command: "login",
+        protocolVersion: 1
+      })
+
+    case result do
       :ok ->
         receive do
-          {:exasol_connect, %{"error" => true, "message" => error_message}} ->
+          %{"status" => "ok", "responseData" => %{"publicKeyPem" => key}} ->
+            {:ok, key}
+
+          %{"status" => "error", "exception" => %{"text" => error_message}} ->
             {:error, error_message}
 
-          {:exasol_connect, %{"error" => false} = response} ->
-            {:ok, {wsconn, response["task"]["authtoken"]}}
+          msg ->
+            {:error, {:unknown_response, inspect(msg)}}
         after
           @timeout -> {:error, "Timed out waiting for authentication response"}
         end
@@ -244,6 +238,43 @@ defmodule Exasol do
       error ->
         error
     end
+  end
+
+  defp authenticate(wsconn, user, password, key) do
+    result =
+      wssend(wsconn, %{
+        username: user,
+        password: encrypt(password, key),
+        useCompression: false
+      })
+
+    case result do
+      :ok ->
+        receive do
+          %{"status" => "ok", "responseData" => %{"sessionId" => _id}} ->
+            :ok
+
+          %{"status" => "error", "exception" => %{"text" => error_message}} ->
+            {:error, error_message}
+
+          msg ->
+            {:error, {:unknown_response, inspect(msg)}}
+        after
+          @timeout -> {:error, "Timed out waiting for authentication response"}
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp encrypt(str, pem) do
+    [entry] = :public_key.pem_decode(pem)
+    key = :public_key.pem_entry_decode(entry)
+
+    str
+    |> :public_key.encrypt_public(key)
+    |> Base.encode64()
   end
 
   defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient)
@@ -285,17 +316,7 @@ defmodule Exasol do
     end
   end
 
-  defp authenticate(wsconn, user, password) do
-    wssend(
-      wsconn,
-      %{
-        id: Register.next_id(),
-        command: "authenticate",
-        options: %{user: user, password_encrypted: :base64.encode(password)}
-      },
-      self()
-    )
-  end
+  defp wssend(wsconn, message, recipient \\ nil)
 
   defp wssend(wsconn, message, recipient) when is_nil(recipient) do
     wssend(wsconn, message, self())
@@ -304,7 +325,6 @@ defmodule Exasol do
   defp wssend(wsconn, message, recipient) do
     case Process.alive?(wsconn) do
       true ->
-        Register.put(message.id, recipient)
         WebSockex.send_frame(wsconn, {:text, Poison.encode!(message)})
         :ok
 
@@ -313,18 +333,10 @@ defmodule Exasol do
     end
   end
 
-  def handle_frame({:text, text}, state) do
+  def handle_frame({:text, text}, %{caller: caller} = state) do
     response = Poison.decode!(text)
-    id = response["task"]["id"]
-
-    case Register.get(id) do
-      {:ok, caller} ->
-        respond(id, caller, response)
-        {:ok, state}
-
-      :error ->
-        {:ok, state}
-    end
+    {:ok, _} = respond(caller, response)
+    {:ok, state}
   end
 
   def handle_frame(:close, state) do
@@ -335,17 +347,6 @@ defmodule Exasol do
     {:ok, state}
   end
 
-  defp respond(id, recipient, response) do
-    case response["task"]["command"] do
-      "monitor" ->
-        respond(recipient, {:exasol_monitor, response})
-
-      _ ->
-        Register.delete(id)
-        respond(recipient, {:exasol_connect, response})
-    end
-  end
-
   defp respond(recipient, response) when is_nil(recipient) do
     {:ok, response}
   end
@@ -354,6 +355,7 @@ defmodule Exasol do
     case Process.alive?(recipient) do
       true ->
         send(recipient, response)
+        {:ok, response}
 
       false ->
         {:error,

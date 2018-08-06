@@ -1,21 +1,19 @@
-defmodule CirroConnect.Mixfile do
+defmodule Exasol.Mixfile do
   use Mix.Project
 
-  @project_url "https://github.com/cirroinc/cirro_connect"
+  @project_url "https://github.com/jwarlander/exasol-elixir"
 
   def project do
     [
-      app: :cirro_connect,
-      version: "0.1.7",
+      app: :exasol,
+      version: "0.1.0",
       elixir: "~> 1.4",
-      build_embedded: Mix.env == :prod,
-      start_permanent: Mix.env == :prod,
+      build_embedded: Mix.env() == :prod,
+      start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: description(),
       package: package(),
-      name: "CirroConnect",
-      source_url: @project_url,
-      homepage_url: "https://www.cirro.com"
+      name: "Exasol"
     ]
   end
 
@@ -32,13 +30,13 @@ defmodule CirroConnect.Mixfile do
   end
 
   defp description() do
-    "An Elixir websocket-based SQL connector for Cirro. CirroConnect allows Elixir programs to connect to Cirro (http://www.cirro.com) using its websocket API and issue federated queries."
+    "Exasol driver for Elixir"
   end
 
   defp package() do
     [
       files: ["lib", "test", "mix.exs", "README*", "LICENSE*"],
-      maintainers: ["Gerrard Hocks", "Daniel Parnell"],
+      maintainers: ["Johan Wärlander"],
       licenses: ["MIT"],
       links: %{
         "GitHub" => @project_url

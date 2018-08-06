@@ -1,17 +1,29 @@
 require Logger
 
-defmodule CirroConnect do
+defmodule Exasol do
   use WebSockex
-  alias CirroConnect.MessageRegister, as: Register
+  alias Exasol.MessageRegister, as: Register
 
-  @moduledoc "Cirro WebSocket-based SQL connector - Copyright Cirro Inc, 2018"
+  @moduledoc "Exasol WebSocket-based SQL connector"
 
   @timeout 60_000
   @protocol_default "wss://"
   @query_path "/websockets/query"
-  @valid_options [:name, :fetchsize, :delimiter, :multi, :user, :password, :password_encrypted, :event_type, :session_id, :systems, :period]
+  @valid_options [
+    :name,
+    :fetchsize,
+    :delimiter,
+    :multi,
+    :user,
+    :password,
+    :password_encrypted,
+    :event_type,
+    :session_id,
+    :systems,
+    :period
+  ]
 
-  @doc "Connect to Cirro"
+  @doc "Connect to Exasol"
   def connect(url, user, password, options \\ []) do
     Register.start()
     opts = Keyword.merge(options, [{:server_name_indication, :disable}])
@@ -22,7 +34,7 @@ defmodule CirroConnect do
     end
   end
 
-  @doc "Connect to Cirro and return a pipeable connection"
+  @doc "Connect to Exasol and return a pipeable connection"
   def connect!(url, user, password) do
     {:ok, state} = connect(url, user, password)
     state
@@ -67,11 +79,13 @@ defmodule CirroConnect do
   @doc "Forward monitoring events to the given process - options can contain restrictions for session_id and event_type"
   def monitor({wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
     id = Register.next_id()
+
     wssend(
       wsconn,
       %{id: id, authtoken: authtoken, command: :monitor, options: options},
       recipient
     )
+
     {:ok, id}
   end
 
@@ -89,14 +103,16 @@ defmodule CirroConnect do
       },
       nil
     )
+
     {:ok, {wsconn, authtoken}}
   end
 
-  @doc "Close the connection to Cirro"
+  @doc "Close the connection to Exasol"
   def close({wsconn, _}) do
     if is_connected({wsconn, nil}) do
       WebSockex.send_frame(wsconn, :close)
     end
+
     {:ok, "closed"}
   end
 
@@ -108,30 +124,33 @@ defmodule CirroConnect do
   @doc "Handletermination of web socket"
   def terminate(reason, state) do
     case state do
-      :ok -> :ok
-      _ -> Logger.error("CirroConnect WebSocket Terminating:\n#{inspect reason}\n\n#{inspect state}\n")
+      :ok ->
+        :ok
+
+      _ ->
+        Logger.error("Exasol WebSocket Terminating:\n#{inspect(reason)}\n\n#{inspect(state)}\n")
     end
+
     exit(:normal)
   end
 
   @doc "Convert a query's output to a List of Maps of column => value"
   def map({:ok, results}) do
     %{"meta" => meta, "rows" => rows} = results
-    colnames = meta
-               |> Enum.map(
-                    fn %{"name" => name} ->
-                      name
-                      |> String.downcase
-                      |> String.to_atom
-                    end
-                  )
+
+    colnames =
+      meta
+      |> Enum.map(fn %{"name" => name} ->
+        name
+        |> String.downcase()
+        |> String.to_atom()
+      end)
+
     rows
-    |> Enum.map(
-         fn row ->
-           Enum.zip(colnames, row)
-           |> Enum.into(%{})
-         end
-       )
+    |> Enum.map(fn row ->
+      Enum.zip(colnames, row)
+      |> Enum.into(%{})
+    end)
   end
 
   def map({:error, results}) do
@@ -151,7 +170,7 @@ defmodule CirroConnect do
   @doc "Convert a query's output to a list of lists, where the first row contains the column names"
   def table({:ok, results}) do
     %{"meta" => meta, "rows" => rows} = results
-    [Enum.map(meta, fn (x) -> x["name"] end) | rows]
+    [Enum.map(meta, fn x -> x["name"] end) | rows]
   end
 
   def table({:error, results}) do
@@ -160,7 +179,7 @@ defmodule CirroConnect do
 
   @doc "Are we connected?"
   def is_connected({wsconn, _authtoken}) do
-    case Process.whereis(:cirro_message_register) do
+    case Process.whereis(:exasol_message_register) do
       nil -> false
       _ -> Process.alive?(wsconn)
     end
@@ -173,12 +192,23 @@ defmodule CirroConnect do
   @doc "Wait for results (default)"
   def await_results(timeout \\ @timeout) do
     receive do
-      {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
-      {:cirro_connect, %{"cancelled" => true, "message" => error_message}} -> {:error, error_message}
-      {:cirro_connect, %{"error" => false} = response} -> {:ok, response}
-      {:cirro_monitor, event} -> {:ok, event}
-      {:error, error} -> {:error, error}
-      {:error} -> {:error, "Unknown error"}
+      {:exasol_connect, %{"error" => true, "message" => error_message}} ->
+        {:error, error_message}
+
+      {:exasol_connect, %{"cancelled" => true, "message" => error_message}} ->
+        {:error, error_message}
+
+      {:exasol_connect, %{"error" => false} = response} ->
+        {:ok, response}
+
+      {:exasol_monitor, event} ->
+        {:ok, event}
+
+      {:error, error} ->
+        {:error, error}
+
+      {:error} ->
+        {:error, "Unknown error"}
     after
       timeout -> {:error, "Timed out waiting for results"}
     end
@@ -194,7 +224,7 @@ defmodule CirroConnect do
   ##
 
   defp finalize_url(url) do
-    prefix = if (url =~ "s://"), do: url, else: @protocol_default <> url
+    prefix = if url =~ "s://", do: url, else: @protocol_default <> url
     prefix <> @query_path
   end
 
@@ -202,16 +232,22 @@ defmodule CirroConnect do
     case authenticate(wsconn, user, password) do
       :ok ->
         receive do
-          {:cirro_connect, %{"error" => true, "message" => error_message}} -> {:error, error_message}
-          {:cirro_connect, %{"error" => false} = response} -> {:ok, {wsconn, response["task"]["authtoken"]}}
+          {:exasol_connect, %{"error" => true, "message" => error_message}} ->
+            {:error, error_message}
+
+          {:exasol_connect, %{"error" => false} = response} ->
+            {:ok, {wsconn, response["task"]["authtoken"]}}
         after
           @timeout -> {:error, "Timed out waiting for authentication response"}
         end
-      error -> error
+
+      error ->
+        error
     end
   end
 
-  defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) when is_nil(recipient) do
+  defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient)
+       when is_nil(recipient) do
     case wssend(
            wsconn,
            %{
@@ -219,8 +255,9 @@ defmodule CirroConnect do
              authtoken: authtoken,
              command: calltype,
              statement: to_string(query),
-             options: options
-                      |> Map.take(@valid_options)
+             options:
+               options
+               |> Map.take(@valid_options)
            },
            self()
          ) do
@@ -237,8 +274,9 @@ defmodule CirroConnect do
              authtoken: authtoken,
              command: calltype,
              statement: to_string(query),
-             options: options
-                      |> Map.take(@valid_options)
+             options:
+               options
+               |> Map.take(@valid_options)
            },
            recipient
          ) do
@@ -253,7 +291,7 @@ defmodule CirroConnect do
       %{
         id: Register.next_id(),
         command: "authenticate",
-        options: %{ user: user, password_encrypted: :base64.encode(password) },
+        options: %{user: user, password_encrypted: :base64.encode(password)}
       },
       self()
     )
@@ -265,20 +303,27 @@ defmodule CirroConnect do
 
   defp wssend(wsconn, message, recipient) do
     case Process.alive?(wsconn) do
-      true -> Register.put(message.id, recipient)
-              WebSockex.send_frame(wsconn, {:text, Poison.encode! message})
-              :ok
-      false -> {:error, "Invalid Cirro connection"}
+      true ->
+        Register.put(message.id, recipient)
+        WebSockex.send_frame(wsconn, {:text, Poison.encode!(message)})
+        :ok
+
+      false ->
+        {:error, "Invalid Exasol connection"}
     end
   end
 
   def handle_frame({:text, text}, state) do
-    response = Poison.decode! text
+    response = Poison.decode!(text)
     id = response["task"]["id"]
+
     case Register.get(id) do
-      {:ok, caller} -> respond(id, caller, response)
-                       {:ok, state}
-      :error -> {:ok, state}
+      {:ok, caller} ->
+        respond(id, caller, response)
+        {:ok, state}
+
+      :error ->
+        {:ok, state}
     end
   end
 
@@ -292,9 +337,12 @@ defmodule CirroConnect do
 
   defp respond(id, recipient, response) do
     case response["task"]["command"] do
-      "monitor" -> respond(recipient, {:cirro_monitor, response})
-      _ -> Register.delete(id)
-           respond(recipient, {:cirro_connect, response})
+      "monitor" ->
+        respond(recipient, {:exasol_monitor, response})
+
+      _ ->
+        Register.delete(id)
+        respond(recipient, {:exasol_connect, response})
     end
   end
 
@@ -304,12 +352,16 @@ defmodule CirroConnect do
 
   defp respond(recipient, response) when is_pid(recipient) do
     case Process.alive?(recipient) do
-      true -> send(recipient, response)
-      false -> {:error, "Process that initiated the Cirro connection (#{inspect(recipient)}) is no longer running"}
+      true ->
+        send(recipient, response)
+
+      false ->
+        {:error,
+         "Process that initiated the Exasol connection (#{inspect(recipient)}) is no longer running"}
     end
   end
 
   defp respond(recipient, response) when is_function(recipient) do
-    spawn fn -> recipient.(response) end
+    spawn(fn -> recipient.(response) end)
   end
 end

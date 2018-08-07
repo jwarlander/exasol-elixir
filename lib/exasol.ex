@@ -7,6 +7,7 @@ defmodule Exasol do
 
   @timeout 5_000
   @protocol_default "ws://"
+  @valid_attributes []
 
   @doc "Connect to Exasol"
   def connect(url, user, password, options \\ []) do
@@ -19,80 +20,39 @@ defmodule Exasol do
   end
 
   @doc "Connect to Exasol and return a pipeable connection"
-  def connect!(url, user, password) do
-    {:ok, state} = connect(url, user, password)
+  def connect!(url, user, password, options \\ []) do
+    {:ok, state} = connect(url, user, password, options)
     state
   end
 
   @doc "Execute a rowless SQL statement"
-  def exec(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
-    dispatch(:execute, wsconn, authtoken, Register.next_id(), query, options, recipient)
+  def exec(query, wsconn, options \\ %{}, recipient \\ nil) do
+    dispatch(:execute, wsconn, query, options, recipient)
   end
 
   @doc "Execute a query, returning status, rows and metadata"
-  def query(query, {wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
-    dispatch(:query, wsconn, authtoken, Register.next_id(), query, options, recipient)
+  def query(query, wsconn, options \\ %{}, recipient \\ nil) do
+    dispatch(:execute, wsconn, query, options, recipient)
   end
 
   @doc "Fetch the next fetchsize batch of results"
-  def next({wsconn, authtoken}, id, recipient \\ nil) do
-    dispatch(:next, wsconn, authtoken, id, nil, %{}, recipient)
+  def next(wsconn, recipient \\ nil) do
+    dispatch(:next, wsconn, nil, %{}, recipient)
   end
 
   @doc "Skip any remaining rows of a query"
-  def skip({wsconn, authtoken}, id, recipient \\ nil) do
-    dispatch(:skip, wsconn, authtoken, id, nil, %{}, recipient)
+  def skip(wsconn, recipient \\ nil) do
+    dispatch(:skip, wsconn, nil, %{}, recipient)
   end
 
   @doc "Cancel a query"
-  def cancel({wsconn, authtoken}, id) do
-    wssend(wsconn, %{id: id, authtoken: authtoken, command: :cancel}, nil)
-    {:ok, {wsconn, authtoken}}
-  end
-
-  @doc "Fetch the task table"
-  def tasks({wsconn, authtoken}, recipient \\ nil) do
-    dispatch(:tasks, wsconn, authtoken, Register.next_id(), nil, %{}, recipient)
-  end
-
-  @doc "Fetch the connections table"
-  def connections({wsconn, authtoken}, recipient \\ nil) do
-    dispatch(:connections, wsconn, authtoken, Register.next_id(), nil, %{}, recipient)
-  end
-
-  @doc "Forward monitoring events to the given process - options can contain restrictions for session_id and event_type"
-  def monitor({wsconn, authtoken}, options \\ %{}, recipient \\ nil) do
-    id = Register.next_id()
-
-    wssend(
-      wsconn,
-      %{id: id, authtoken: authtoken, command: :monitor, options: options},
-      recipient
-    )
-
-    {:ok, id}
-  end
-
-  @doc "Close a named connection"
-  def close({wsconn, authtoken}, %{name: name}) do
-    wssend(
-      wsconn,
-      %{
-        id: Register.next_id(),
-        authtoken: authtoken,
-        command: :close,
-        options: %{
-          name: name
-        }
-      },
-      nil
-    )
-
-    {:ok, {wsconn, authtoken}}
+  def cancel(wsconn) do
+    wssend(wsconn, %{command: :cancel}, nil)
+    {:ok, wsconn}
   end
 
   @doc "Close the connection to Exasol"
-  def close({wsconn, _}) do
+  def close(wsconn) do
     if is_connected({wsconn, nil}) do
       WebSockex.send_frame(wsconn, :close)
     end
@@ -153,7 +113,8 @@ defmodule Exasol do
 
   @doc "Convert a query's output to a list of lists, where the first row contains the column names"
   def table({:ok, results}) do
-    %{"meta" => meta, "rows" => rows} = results
+    result = get_in(results, ["responseData", "results"]) |> Enum.at(0)
+    %{"resultSet" => %{"columns" => meta, "data" => rows}} = result
     [Enum.map(meta, fn x -> x["name"] end) | rows]
   end
 
@@ -176,17 +137,11 @@ defmodule Exasol do
   @doc "Wait for results (default)"
   def await_results(timeout \\ @timeout) do
     receive do
-      {:exasol_connect, %{"error" => true, "message" => error_message}} ->
+      %{"status" => "error", "exception" => %{"text" => error_message}} ->
         {:error, error_message}
 
-      {:exasol_connect, %{"cancelled" => true, "message" => error_message}} ->
-        {:error, error_message}
-
-      {:exasol_connect, %{"error" => false} = response} ->
+      %{"status" => "ok"} = response ->
         {:ok, response}
-
-      {:exasol_monitor, event} ->
-        {:ok, event}
 
       {:error, error} ->
         {:error, error}
@@ -277,18 +232,16 @@ defmodule Exasol do
     |> Base.encode64()
   end
 
-  defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient)
+  defp dispatch(calltype, wsconn, query, options, recipient)
        when is_nil(recipient) do
     case wssend(
            wsconn,
            %{
-             id: id,
-             authtoken: authtoken,
              command: calltype,
-             statement: to_string(query),
+             sqlText: to_string(query),
              options:
                options
-               |> Map.take(@valid_options)
+               |> Map.take(@valid_attributes)
            },
            self()
          ) do
@@ -297,21 +250,19 @@ defmodule Exasol do
     end
   end
 
-  defp dispatch(calltype, wsconn, authtoken, id, query, options, recipient) do
+  defp dispatch(calltype, wsconn, query, options, recipient) do
     case wssend(
            wsconn,
            %{
-             id: id,
-             authtoken: authtoken,
              command: calltype,
-             statement: to_string(query),
-             options:
+             sqlText: to_string(query),
+             attributes:
                options
-               |> Map.take(@valid_options)
+               |> Map.take(@valid_attributes)
            },
            recipient
          ) do
-      :ok -> {:ok, id}
+      :ok -> :ok
       error -> error
     end
   end

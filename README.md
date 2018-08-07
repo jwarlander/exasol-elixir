@@ -23,7 +23,7 @@ end
 
 ## Usage
 
-###Connecting to Exasol
+### Connecting to Exasol
 Here, and in all subsequent examples, `exasol.host.com` refers to your Exasol installation's exposed websocket address.
 The ws:// protocol is currently active as the default. wss:// support will become the default in an upcoming release.
 
@@ -253,3 +253,13 @@ The default process message handler looks like this:
     end
   end
 ```
+
+## Testing
+
+Start a Docker instance of Exasol:
+
+    docker run --detach --privileged --stop-timeout 120 -p 127.0.0.1:8563:8888 exasol/docker-db:latest
+
+..then run tests:
+
+    mix test

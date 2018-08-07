@@ -2,11 +2,11 @@
 
 **An Elixir websocket-based SQL connector for Exasol**
 
-Allows Elixir programs to connect to Exasol (https://www.exasol.com/) using its websocket API and issue queries.
+Allows Elixir programs to connect to Exasol (https://www.exasol.com/) using its [WebSocket API](https://github.com/EXASOL/websocket-api/blob/master/WebsocketAPI.md) and issue queries.
 
-_**NOTE:** Project is being adapted for Exasol; it is currently not in a working state for that purpose, however.._
+_**NOTE:** Project is being adapted for Exasol; currently there is no _
 
-Based on [CirroConnect](https://github.com/cirroinc/cirro_connect) - Copyright Cirro Inc, 2018.
+Based on [CirroConnect](https://github.com/cirroinc/cirro_connect) (Copyright Cirro Inc, 2018).
 
 ## Installation
 

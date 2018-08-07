@@ -6,8 +6,23 @@ defmodule Exasol do
   require Logger
 
   @timeout 5_000
-  @protocol_default "ws://"
-  @valid_attributes []
+  @valid_attributes [
+    :autocommit,
+    :compressionEnabled,
+    :currentSchema,
+    :dateFormat,
+    :dateLanguage,
+    :datetimeFormat,
+    :defaultLikeEscapeCharacter,
+    :feedbackInterval,
+    :numericCharacters,
+    :openTransaction,
+    :queryTimeout,
+    :snapshotTransactionsEnabled,
+    :timestampUtcEnabled,
+    :timezone,
+    :timeZoneBehavior
+  ]
 
   @doc "Connect to Exasol"
   def connect(url, user, password, options \\ []) do
@@ -26,43 +41,40 @@ defmodule Exasol do
   end
 
   @doc "Execute a rowless SQL statement"
-  def exec(query, wsconn, options \\ %{}, recipient \\ nil) do
-    dispatch(:execute, wsconn, query, options, recipient)
+  def exec(query, wsconn, options \\ %{}) do
+    dispatch(:execute, wsconn, %{sqlText: query}, options)
   end
 
   @doc "Execute a query, returning status, rows and metadata"
-  def query(query, wsconn, options \\ %{}, recipient \\ nil) do
-    dispatch(:execute, wsconn, query, options, recipient)
+  def query(query, wsconn, options \\ %{}) do
+    dispatch(:execute, wsconn, %{sqlText: query}, options)
   end
 
-  @doc "Fetch the next fetchsize batch of results"
-  def next(wsconn, recipient \\ nil) do
-    dispatch(:next, wsconn, nil, %{}, recipient)
+  @doc "Fetch rows from a result set"
+  def fetch(wsconn, handle, start_position, num_bytes) do
+    query = %{resultSetHandle: handle, startPosition: start_position, numBytes: num_bytes}
+    dispatch(:fetch, wsconn, query, %{})
   end
 
   @doc "Skip any remaining rows of a query"
-  def skip(wsconn, recipient \\ nil) do
-    dispatch(:skip, wsconn, nil, %{}, recipient)
+  def close_result_set(wsconn, handles) when is_list(handles) do
+    dispatch(:closeResultSet, wsconn, %{resultSetHandles: handles}, %{})
   end
 
   @doc "Cancel a query"
   def cancel(wsconn) do
-    wssend(wsconn, %{command: :cancel}, nil)
+    wssend(wsconn, %{command: :abortQuery})
     {:ok, wsconn}
   end
 
   @doc "Close the connection to Exasol"
   def close(wsconn) do
-    if is_connected({wsconn, nil}) do
+    if is_connected(wsconn) do
+      wssend(wsconn, %{command: :disconnect})
       WebSockex.send_frame(wsconn, :close)
     end
 
     {:ok, "closed"}
-  end
-
-  @doc "Handle incorrect close gracefully"
-  def close(nil) do
-    {:error, "Invalid connection"}
   end
 
   @doc "Handletermination of web socket"
@@ -232,48 +244,20 @@ defmodule Exasol do
     |> Base.encode64()
   end
 
-  defp dispatch(calltype, wsconn, query, options, recipient)
-       when is_nil(recipient) do
+  defp dispatch(calltype, wsconn, query, options) do
     case wssend(
            wsconn,
-           %{
+           Map.merge(query, %{
              command: calltype,
-             sqlText: to_string(query),
-             options:
-               options
-               |> Map.take(@valid_attributes)
-           },
-           self()
+             attributes: Map.take(options, @valid_attributes)
+           })
          ) do
       :ok -> await_results(options[:timeout] || @timeout)
       error -> error
     end
   end
 
-  defp dispatch(calltype, wsconn, query, options, recipient) do
-    case wssend(
-           wsconn,
-           %{
-             command: calltype,
-             sqlText: to_string(query),
-             attributes:
-               options
-               |> Map.take(@valid_attributes)
-           },
-           recipient
-         ) do
-      :ok -> :ok
-      error -> error
-    end
-  end
-
-  defp wssend(wsconn, message, recipient \\ nil)
-
-  defp wssend(wsconn, message, recipient) when is_nil(recipient) do
-    wssend(wsconn, message, self())
-  end
-
-  defp wssend(wsconn, message, recipient) do
+  defp wssend(wsconn, message) do
     case Process.alive?(wsconn) do
       true ->
         WebSockex.send_frame(wsconn, {:text, Poison.encode!(message)})

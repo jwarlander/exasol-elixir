@@ -30,4 +30,20 @@ defmodule ExasolTest do
 
     assert Exasol.map(result) == [%{"FOO" => 1, "BAR" => "a"}, %{"FOO" => 2, "BAR" => "b"}]
   end
+
+  test "Inserting into a table" do
+    {:ok, conn} = Exasol.connect("ws://localhost:8563", "sys", "exasol")
+    Exasol.exec("CREATE TABLE public.dummy (foo INTEGER, bar VARCHAR(5))", conn)
+    Exasol.exec("INSERT INTO public.dummy VALUES (1, 'beep')", conn)
+    result = Exasol.query("SELECT * FROM public.dummy", conn)
+
+    assert Exasol.map(result) == [%{"FOO" => 1, "BAR" => "beep"}]
+  end
+
+  test "Closing a connection" do
+    {:ok, conn} = Exasol.connect("ws://localhost:8563", "sys", "exasol")
+    assert {:ok, %{"responseData" => _}} = Exasol.query(@simple_query, conn)
+    assert {:ok, %{"status" => "ok"}} = Exasol.close(conn)
+    assert {:error, :disconnected} = Exasol.query(@simple_query, conn)
+  end
 end

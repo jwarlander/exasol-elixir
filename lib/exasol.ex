@@ -24,6 +24,10 @@ defmodule Exasol do
     :timeZoneBehavior
   ]
 
+  ##
+  ## Public API - Connection Handling
+  ##
+
   @doc "Connect to Exasol"
   def connect(url, user, password, options \\ []) do
     opts = Keyword.merge(options, [{:server_name_indication, :disable}])
@@ -40,12 +44,37 @@ defmodule Exasol do
     state
   end
 
-  @doc "Execute a rowless SQL statement"
-  def exec(query, wsconn, options \\ %{}) do
-    dispatch(:execute, wsconn, %{sqlText: query}, options)
+  @doc "Close the connection to Exasol"
+  def close(wsconn) do
+    WebSockex.cast(wsconn, :close)
+    await_results(@timeout)
   end
 
-  @doc "Execute a query, returning status, rows and metadata"
+  @doc "Are we connected?"
+  def is_connected(nil), do: false
+
+  def is_connected(wsconn) do
+    Process.alive?(wsconn)
+  end
+
+  ##
+  ## Public API - Queries
+  ##
+
+  @doc "Execute an SQL statement, discarding the results"
+  def exec(query, wsconn, options \\ %{}) do
+    {:ok, response} = result = dispatch(:execute, wsconn, %{sqlText: query}, options)
+    {:ok, _} = close_result_sets(wsconn, response["responseData"]["results"])
+    result
+  end
+
+  @doc """
+  Execute a query, returning status, rows and metadata
+
+  Note that a `resultSetHandle` might be returned, which then would have to be
+  used in order to get the actual data, and then should be closed using
+  `close_result_sets/2`
+  """
   def query(query, wsconn, options \\ %{}) do
     dispatch(:execute, wsconn, %{sqlText: query}, options)
   end
@@ -61,34 +90,30 @@ defmodule Exasol do
     dispatch(:closeResultSet, wsconn, %{resultSetHandles: handles}, %{})
   end
 
+  @doc "Close result sets from a given list of results"
+  def close_result_sets(wsconn, results) when is_list(results) do
+    handles =
+      results
+      |> Enum.filter(&has_result_set?/1)
+      |> Enum.map(fn %{"resultSet" => %{"resultSetHandle" => handle}} -> handle end)
+
+    dispatch(:closeResultSet, wsconn, %{resultSetHandles: handles})
+  end
+
+  def close_result_sets(_, nil), do: {:ok, :no_result_sets}
+
+  defp has_result_set?(%{"resultSet" => %{"resultSetHandle" => _}}), do: true
+  defp has_result_set?(_), do: false
+
   @doc "Cancel a query"
   def cancel(wsconn) do
     wssend(wsconn, %{command: :abortQuery})
     {:ok, wsconn}
   end
 
-  @doc "Close the connection to Exasol"
-  def close(wsconn) do
-    if is_connected(wsconn) do
-      wssend(wsconn, %{command: :disconnect})
-      WebSockex.send_frame(wsconn, :close)
-    end
-
-    {:ok, "closed"}
-  end
-
-  @doc "Handletermination of web socket"
-  def terminate(reason, state) do
-    case state do
-      :ok ->
-        :ok
-
-      _ ->
-        Logger.error("Exasol WebSocket Terminating:\n#{inspect(reason)}\n\n#{inspect(state)}\n")
-    end
-
-    exit(:normal)
-  end
+  ##
+  ## Public API - Data Transformation
+  ##
 
   @doc "Convert a query's output to a List of Maps of column => value"
   def map({:ok, results}) do
@@ -129,42 +154,6 @@ defmodule Exasol do
 
   def table({:error, results}) do
     {:error, results}
-  end
-
-  @doc "Are we connected?"
-  def is_connected({wsconn, _authtoken}) do
-    case Process.whereis(:exasol_message_register) do
-      nil -> false
-      _ -> Process.alive?(wsconn)
-    end
-  end
-
-  def is_connected(nil) do
-    false
-  end
-
-  @doc "Wait for results (default)"
-  def await_results(timeout \\ @timeout) do
-    receive do
-      %{"status" => "error", "exception" => %{"text" => error_message}} ->
-        {:error, error_message}
-
-      %{"status" => "ok"} = response ->
-        {:ok, response}
-
-      {:error, error} ->
-        {:error, error}
-
-      {:error} ->
-        {:error, "Unknown error"}
-    after
-      timeout -> {:error, "Timed out waiting for results"}
-    end
-  end
-
-  @doc "Dump a message (example)"
-  def dump_message(message) do
-    IO.puts("EVENT: " <> inspect(message))
   end
 
   ##
@@ -241,7 +230,7 @@ defmodule Exasol do
     |> Base.encode64()
   end
 
-  defp dispatch(calltype, wsconn, query, options) do
+  defp dispatch(calltype, wsconn, query, options \\ %{}) do
     case wssend(
            wsconn,
            Map.merge(query, %{
@@ -255,15 +244,34 @@ defmodule Exasol do
   end
 
   defp wssend(wsconn, message) do
-    case Process.alive?(wsconn) do
-      true ->
-        WebSockex.send_frame(wsconn, {:text, Poison.encode!(message)})
-        :ok
-
-      false ->
-        {:error, "Invalid Exasol connection"}
+    if Process.alive?(wsconn) do
+      WebSockex.cast(wsconn, {:send, message})
+    else
+      {:error, :disconnected}
     end
   end
+
+  defp await_results(timeout) do
+    receive do
+      %{"status" => "error", "exception" => %{"text" => error_message}} ->
+        {:error, error_message}
+
+      %{"status" => "ok"} = response ->
+        {:ok, response}
+
+      {:error, error} ->
+        {:error, error}
+
+      {:error} ->
+        {:error, "Unknown error"}
+    after
+      timeout -> {:error, "Timed out waiting for results"}
+    end
+  end
+
+  ##
+  ## WebSockex Callbacks
+  ##
 
   def handle_frame({:text, text}, %{caller: caller} = state) do
     response = Poison.decode!(text)
@@ -275,8 +283,35 @@ defmodule Exasol do
     {:close, state}
   end
 
-  def handle_disconnect(_, state) do
+  def handle_cast(:close, state) do
+    {:reply, {:text, Poison.encode!(%{command: :disconnect})}, Map.put(state, :stage, :closing)}
+  end
+
+  def handle_cast({:send, _}, %{stage: :closing, caller: caller} = state) do
+    respond(caller, {:error, :disconnected})
     {:ok, state}
+  end
+
+  def handle_cast({:send, message}, state) do
+    {:reply, {:text, Poison.encode!(message)}, state}
+  end
+
+  def handle_disconnect(_, state) do
+    IO.puts("Disconnecting (#{inspect(state)})")
+    {:ok, state}
+  end
+
+  @doc "Handle termination of web socket"
+  def terminate(reason, state) do
+    case state do
+      %{stage: :closing} ->
+        :ok
+
+      _ ->
+        Logger.error("Exasol WebSocket Terminating:\n#{inspect(reason)}\n\n#{inspect(state)}\n")
+    end
+
+    exit(:normal)
   end
 
   defp respond(recipient, response) when is_nil(recipient) do

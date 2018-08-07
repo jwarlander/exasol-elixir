@@ -23,4 +23,13 @@ defmodule ExasolTest do
 
     assert Exasol.table(result) == [["FOO", "BAR"], [1, 2], ["a", "b"]]
   end
+
+  test "Convert query results to a map" do
+    {:ok, conn} = Exasol.connect("ws://localhost:8563", "sys", "exasol")
+
+    result =
+      Exasol.query("SELECT 1 AS foo, 'a' AS bar UNION ALL SELECT 2 AS foo, 'b' AS bar", conn)
+
+    assert Exasol.map(result) == [%{"FOO" => 1, "BAR" => "a"}, %{"FOO" => 2, "BAR" => "b"}]
+  end
 end

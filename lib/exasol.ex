@@ -92,19 +92,16 @@ defmodule Exasol do
 
   @doc "Convert a query's output to a List of Maps of column => value"
   def map({:ok, results}) do
-    %{"meta" => meta, "rows" => rows} = results
+    result = get_in(results, ["responseData", "results"]) |> Enum.at(0)
+    %{"resultSet" => %{"columns" => meta, "data" => cols}} = result
 
-    colnames =
-      meta
-      |> Enum.map(fn %{"name" => name} ->
-        name
-        |> String.downcase()
-        |> String.to_atom()
-      end)
+    colnames = Enum.map(meta, fn %{"name" => name} -> name end)
 
-    rows
-    |> Enum.map(fn row ->
-      Enum.zip(colnames, row)
+    cols
+    |> Enum.zip()
+    |> Enum.map(fn fields ->
+      colnames
+      |> Enum.zip(Tuple.to_list(fields))
       |> Enum.into(%{})
     end)
   end

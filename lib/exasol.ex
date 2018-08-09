@@ -121,10 +121,18 @@ defmodule Exasol do
   ##
 
   @doc "Convert a query's output to a List of Maps of column => value"
-  def map({:ok, results}) do
-    result = get_in(results, ["responseData", "results"]) |> Enum.at(0)
-    %{"resultSet" => %{"columns" => meta, "data" => cols}} = result
+  def map(%{"responseData" => %{"results" => results}}),
+    do: Enum.flat_map(results, &do_map/1)
 
+  def map({:ok, %{"responseData" => %{"results" => results}}}),
+    do: Enum.flat_map(results, &do_map/1)
+
+  def map({:error, results}),
+    do: {:error, results}
+
+  defp do_map(%{"resultSet" => %{"numRows" => 0}}), do: []
+
+  defp do_map(%{"resultSet" => %{"columns" => meta, "data" => cols}}) do
     colnames = Enum.map(meta, fn %{"name" => name} -> name end)
 
     cols
@@ -134,10 +142,6 @@ defmodule Exasol do
       |> Enum.zip(Tuple.to_list(fields))
       |> Enum.into(%{})
     end)
-  end
-
-  def map({:error, results}) do
-    {:error, results}
   end
 
   @doc "Return just the rows from a query"

@@ -5,6 +5,7 @@ defmodule ExasolTest do
 
   @simple_query "SELECT 1 AS foo"
   @multiple_row_query "SELECT 1 AS foo, 'a' AS bar UNION ALL SELECT 2 AS foo, 'b' AS bar"
+  @no_row_query "SELECT * FROM (SELECT 1 AS foo, 'a' AS bar UNION ALL SELECT 2 AS foo, 'b' AS bar) x WHERE false"
 
   test "Try to connect" do
     assert {:ok, _} = Exasol.connect("ws://localhost:8563", "sys", "exasol")
@@ -26,9 +27,12 @@ defmodule ExasolTest do
 
   test "Convert query results to a map" do
     {:ok, conn} = Exasol.connect("ws://localhost:8563", "sys", "exasol")
-    result = Exasol.query(@multiple_row_query, conn)
 
+    result = Exasol.query(@multiple_row_query, conn)
     assert Exasol.map(result) == [%{"FOO" => 1, "BAR" => "a"}, %{"FOO" => 2, "BAR" => "b"}]
+
+    result = Exasol.query(@no_row_query, conn)
+    assert Exasol.map(result) == []
   end
 
   test "Inserting into a table" do

@@ -63,9 +63,14 @@ defmodule Exasol do
 
   @doc "Execute an SQL statement, discarding the results"
   def exec(query, wsconn, options \\ %{}) do
-    {:ok, response} = result = dispatch(:execute, wsconn, %{sqlText: query}, options)
-    {:ok, _} = close_result_sets(wsconn, response["responseData"]["results"])
-    result
+    case dispatch(:execute, wsconn, %{sqlText: query}, options) do
+      {:ok, response} ->
+        {:ok, _} = close_result_sets(wsconn, response["responseData"]["results"])
+        {:ok, response}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc """

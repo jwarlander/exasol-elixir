@@ -171,7 +171,7 @@ defmodule Exasol do
 
   defp finalize_connection(wsconn, user, password) do
     with {:ok, key} <- start_login(wsconn),
-         :ok = authenticate(wsconn, user, password, key),
+         :ok <- authenticate(wsconn, user, password, key),
          do: {:ok, wsconn}
   end
 

@@ -5,6 +5,7 @@ defmodule Exasol do
   use WebSockex
   require Logger
 
+  @fetch_size 64_000_000
   @timeout 5_000
   @valid_attributes [
     :autocommit,
@@ -84,10 +85,60 @@ defmodule Exasol do
     dispatch(:execute, wsconn, %{sqlText: query}, options)
   end
 
+  def query_all(query, wsconn, options \\ %{}) do
+    case query(query, wsconn, options) do
+      {:ok, response} ->
+        {:ok, new_response} = do_query_all(response, wsconn, options)
+        {:ok, _} = close_result_sets(wsconn, response["responseData"]["results"])
+        {:ok, new_response}
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp do_query_all(response, wsconn, options) do
+    results = get_in(response, ["responseData", "results"])
+    fetch_size = Map.get(options, :fetchSize, @fetch_size)
+    case Enum.at(results, 0) do
+      %{"data" => _} ->
+        {:ok, response}
+      %{"resultSet" => %{"resultSetHandle" => _}} = result ->
+        {:ok, new_result} = fetch_all(wsconn, result, fetch_size)
+        {:ok, put_in(response, ["responseData", "results"], [new_result])}
+    end
+  end
+
   @doc "Fetch rows from a result set"
   def fetch(wsconn, handle, start_position, num_bytes) do
     query = %{resultSetHandle: handle, startPosition: start_position, numBytes: num_bytes}
     dispatch(:fetch, wsconn, query, %{})
+  end
+
+  def fetch_all(wsconn, result, num_bytes, position \\ 0, rows \\ []) do
+    handle = get_in(result, ["resultSet", "resultSetHandle"])
+    {:ok, response} = fetch(wsconn, handle, position, num_bytes)
+
+    new_rows = get_in(response, ["responseData", "data"])
+    rows = append_rows(rows, new_rows)
+
+    num_rows = get_in(response, ["responseData", "numRows"])
+    total_rows = get_in(result, ["resultSet", "numRows"])
+    if position + num_rows < total_rows do
+      fetch_all(wsconn, result, num_bytes, position + num_rows, rows)
+    else
+      new_result =
+        result
+        |> put_in(["resultSet", "data"], rows)
+        |> put_in(["resultSet", "numRowsInMessage"], total_rows)
+      {:ok, new_result}
+    end
+  end
+
+  defp append_rows([], new_rows), do: new_rows
+  defp append_rows(rows, new_rows) do
+      for {col_cur, col_new} <- Enum.zip(rows, new_rows) do
+        col_cur ++ col_new
+      end
   end
 
   @doc "Skip any remaining rows of a query"

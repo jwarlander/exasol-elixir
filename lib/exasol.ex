@@ -100,7 +100,7 @@ defmodule Exasol do
     results = get_in(response, ["responseData", "results"])
     fetch_size = Map.get(options, :fetchSize, @fetch_size)
     case Enum.at(results, 0) do
-      %{"data" => _} ->
+      %{"resultSet" => %{"data" => _}} ->
         {:ok, response}
       %{"resultSet" => %{"resultSetHandle" => _}} = result ->
         {:ok, new_result} = fetch_all(wsconn, result, fetch_size)

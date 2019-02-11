@@ -6,7 +6,7 @@ defmodule Exasol do
   require Logger
 
   @fetch_size 64_000_000
-  @timeout 5_000
+  @timeout 15_000
   @valid_attributes [
     :autocommit,
     :compressionEnabled,
@@ -91,6 +91,7 @@ defmodule Exasol do
         {:ok, new_response} = do_query_all(response, wsconn, options)
         {:ok, _} = close_result_sets(wsconn, response["responseData"]["results"])
         {:ok, new_response}
+
       {:error, reason} ->
         {:error, reason}
     end
@@ -99,9 +100,11 @@ defmodule Exasol do
   defp do_query_all(response, wsconn, options) do
     results = get_in(response, ["responseData", "results"])
     fetch_size = Map.get(options, :fetchSize, @fetch_size)
+
     case Enum.at(results, 0) do
       %{"resultSet" => %{"data" => _}} ->
         {:ok, response}
+
       %{"resultSet" => %{"resultSetHandle" => _}} = result ->
         {:ok, new_result} = fetch_all(wsconn, result, fetch_size)
         {:ok, put_in(response, ["responseData", "results"], [new_result])}
@@ -123,6 +126,7 @@ defmodule Exasol do
 
     num_rows = get_in(response, ["responseData", "numRows"])
     total_rows = get_in(result, ["resultSet", "numRows"])
+
     if position + num_rows < total_rows do
       fetch_all(wsconn, result, num_bytes, position + num_rows, rows)
     else
@@ -130,15 +134,17 @@ defmodule Exasol do
         result
         |> put_in(["resultSet", "data"], rows)
         |> put_in(["resultSet", "numRowsInMessage"], total_rows)
+
       {:ok, new_result}
     end
   end
 
   defp append_rows([], new_rows), do: new_rows
+
   defp append_rows(rows, new_rows) do
-      for {col_cur, col_new} <- Enum.zip(rows, new_rows) do
-        col_cur ++ col_new
-      end
+    for {col_cur, col_new} <- Enum.zip(rows, new_rows) do
+      col_cur ++ col_new
+    end
   end
 
   @doc "Skip any remaining rows of a query"

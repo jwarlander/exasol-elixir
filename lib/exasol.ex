@@ -102,6 +102,9 @@ defmodule Exasol do
     fetch_size = Map.get(options, :fetchSize, @fetch_size)
 
     case Enum.at(results, 0) do
+      %{"resultSet" => %{"numRows" => 0}} ->
+        {:ok, response}
+
       %{"resultSet" => %{"data" => _}} ->
         {:ok, response}
 

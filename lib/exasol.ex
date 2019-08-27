@@ -6,7 +6,7 @@ defmodule Exasol do
   require Logger
 
   @fetch_size 64_000_000
-  @timeout 15_000
+  @timeout 10 * 60_000
   @valid_attributes [
     :autocommit,
     :compressionEnabled,

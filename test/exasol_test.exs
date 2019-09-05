@@ -14,6 +14,12 @@ defmodule ExasolTest do
   FROM (SELECT 1 FROM DUAL CONNECT BY LEVEL<=1500)
   """
 
+  @multiple_stmt_batch [
+    "INSERT INTO public.test_multi_stmt (x) values (1);",
+    "INSERT INTO public.test_multi_stmt (x) values (2);",
+    "INSERT INTO public.test_multi_stmt (x) values (3);"
+  ]
+
   test "Try to connect" do
     assert {:ok, _} = Exasol.connect("ws://localhost:8563", "sys", "exasol")
   end
@@ -33,6 +39,17 @@ defmodule ExasolTest do
     assert Exasol.table(result) == [
       ["TEXTCOL"],
       Enum.map(1..1_500, fn _ -> "Just some text" end)
+    ]
+  end
+
+  test "Execute multiple SQL statements as a batch" do
+    {:ok, conn} = Exasol.connect("ws://localhost:8563", "sys", "exasol")
+    {:ok, _} = Exasol.exec("CREATE OR REPLACE TABLE public.test_multi_stmt (x int)", conn)
+    {:ok, _} = Exasol.exec_batch(@multiple_stmt_batch, conn)
+
+    result = Exasol.query_all("SELECT * FROM public.test_multi_stmt", conn)
+    assert Exasol.table(result) == [
+      ["X"], [1, 2, 3]
     ]
   end
 

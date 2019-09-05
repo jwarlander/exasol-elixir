@@ -74,6 +74,18 @@ defmodule Exasol do
     end
   end
 
+  @doc "Execute multiple SQL statements sequentially as a batch"
+  def exec_batch(queries, wsconn, options \\ %{}) when is_list(queries) do
+    case dispatch(:executeBatch, wsconn, %{sqlTexts: queries}, options) do
+      {:ok, response} ->
+        {:ok, _} = close_result_sets(wsconn, response["responseData"]["results"])
+        {:ok, response}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @doc """
   Execute a query, returning status, rows and metadata
 
